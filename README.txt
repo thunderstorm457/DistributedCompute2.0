@@ -216,18 +216,19 @@ Current Development Status
 
 DistributedCompute is currently in its early development stage.
 
-The repository contains initial implementations of:
+The repository currently contains prototypes for:
 
-NodeScout hardware benchmarking.
-Provisioning server API.
-Identity management.
-Node Agent.
-Initial database schema.
-Initial dynamic role allocator.
+Provisioning API with self-service node registration, signed identity recovery, heartbeats, and admin controls.
+PostgreSQL-compatible schema migrations and Redis-backed ephemeral node state.
+Mac Node Agent with Keychain identity storage and a development LaunchAgent installer.
+CPU and memory Compute Credit quote and settlement calculations.
+An admin-only distributed `sum_squares` diagnostic that requires distinct online compute nodes and verifies shard coverage/results.
 
-These components are prototypes and are not yet integrated into a production-ready distributed computing network.
+The target product is a serverless-style compute grid: users submit bounded container workloads, opted-in nodes execute eligible tasks, and contributors earn internal credits for verified resources delivered. A user's credits can pay for capacity across many providers; they do not need to own as many cores as the workload requests. Work must expose parallel tasks or distributed-service behavior to use multiple independent computers; arbitrary containers cannot be split automatically. The initial CPU/RAM credit definition is documented in docs/economics.md.
 
-The immediate development priority is Network Foundation 1.0, followed by the communication and computational infrastructure.
+The repository does not yet include NodeScout benchmarks, a user workload scheduler or isolated container runtime, an auditable credit ledger or economy-node quorum, or a signed and notarized Mac package. The built-in diagnostic is not a user workload runner. The prototypes are not production-ready and must not run arbitrary submitted containers.
+
+The immediate priority is a persistent staging deployment with PostgreSQL and Redis, followed by a sandboxed first workload and verifiable credit accounting.
 
 The Long-Term Vision
 

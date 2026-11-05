@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: distributedcompute
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: distributedcompute
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U distributedcompute -d distributedcompute"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment: &server-environment
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://distributedcompute:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/distributedcompute
+      RATE_LIMIT_STORAGE_URI: redis://redis:6379/0
+      PROVISIONING_ADMIN_TOKEN: ${PROVISIONING_ADMIN_TOKEN:?Set PROVISIONING_ADMIN_TOKEN in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    environment: *server-environment
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

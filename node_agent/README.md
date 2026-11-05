@@ -29,11 +29,38 @@ To keep sending heartbeats every minute, omit `--once`:
 python -m node_agent --server https://<provisioning-server-url>
 ```
 
+## Install as a Background Service
+
+After installing the requirements in the virtual environment, install a
+per-user LaunchAgent:
+
+```sh
+python -m node_agent --server https://<provisioning-server-url> --install-service
+python -m node_agent --service-status
+```
+
+The service starts at login, restarts if the process exits, and writes logs to
+`~/Library/Logs/DistributedCompute`. It copies the agent and a dedicated
+virtual environment into `~/Library/Application Support/DistributedCompute/NodeAgent`,
+so it does not depend on the downloaded source folder staying in place.
+During each heartbeat cycle, the agent can claim and execute one assigned
+admin `sum_squares` diagnostic shard; it does not execute user-supplied code.
+
+Remove the service with:
+
+```sh
+python -m node_agent --uninstall-service
+```
+
+Uninstall removes the LaunchAgent and its copied environment but preserves the
+Keychain identity and logs. This is a development installer, not a signed or
+notarized public macOS package.
+
 ## Development Test
 
 From the repository root, install the agent requirements and run:
 
 ```sh
 python -m pip install -r node_agent/requirements.txt
-python -m unittest node_agent.test_client
+python -m unittest node_agent.test_client node_agent.test_macos_service
 ```

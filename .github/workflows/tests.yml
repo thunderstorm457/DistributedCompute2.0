@@ -1,0 +1,49 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: distributedcompute
+          POSTGRES_PASSWORD: test-password
+          POSTGRES_DB: distributedcompute
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U distributedcompute -d distributedcompute"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: production
+      DATABASE_URL: postgresql+psycopg://distributedcompute:test-password@localhost:5432/distributedcompute
+      RATE_LIMIT_STORAGE_URI: redis://localhost:6379/0
+      PROVISIONING_ADMIN_TOKEN: ci-only-test-token-with-sufficient-length-0000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            server/requirements.txt
+            node_agent/requirements.txt
+      - run: python -m pip install -r server/requirements.txt -r node_agent/requirements.txt
+      - run: alembic upgrade head
+      - run: python -m unittest server.test_main server.test_migrations server.test_economics node_agent.test_client node_agent.test_macos_service

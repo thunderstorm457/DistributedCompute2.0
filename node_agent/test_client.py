@@ -56,6 +56,7 @@ class FakeProvisioningServer:
             node = {
                 "node_id": str(uuid.uuid4()),
                 "role": "compute",
+                "status": "approved",
                 "registered_at": now,
                 "last_seen": now,
             }

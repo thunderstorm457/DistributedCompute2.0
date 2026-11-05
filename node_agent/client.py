@@ -2,6 +2,7 @@ import argparse
 import base64
 import os
 import platform
+import subprocess
 import sys
 import time
 import uuid
@@ -58,6 +59,7 @@ class KeychainIdentityStore:
 class NodeInfo:
     node_id: str
     role: str
+    status: str
 
 
 class NodeAgent:
@@ -81,7 +83,9 @@ class NodeAgent:
         )
         self.node: Optional[NodeInfo] = None
 
-    def _challenge(self, action: str, node_id: str = "") -> tuple[str, str]:
+    def _challenge(
+        self, action: str, node_id: str = "", context: str = ""
+    ) -> tuple[str, str]:
         response = self.client.post(
             "/v1/challenges", json={"public_key": self.public_key}
         )
@@ -90,7 +94,10 @@ class NodeAgent:
         message = (
             f"distributedcompute:v1:{action}:{node_id}:"
             f"{challenge['challenge_id']}:{challenge['challenge']}"
-        ).encode("utf-8")
+        )
+        if context:
+            message = f"{message}:{context}"
+        message = message.encode("utf-8")
         signature = base64.b64encode(self.private_key.sign(message)).decode("ascii")
         return challenge["challenge_id"], signature
 
@@ -108,7 +115,7 @@ class NodeAgent:
             return None
         response.raise_for_status()
         body = response.json()
-        return NodeInfo(node_id=body["node_id"], role=body["role"])
+        return NodeInfo(node_id=body["node_id"], role=body["role"], status=body["status"])
 
     def _register(self) -> NodeInfo:
         challenge_id, signature = self._challenge("register")
@@ -127,7 +134,7 @@ class NodeAgent:
                 return recovered
         response.raise_for_status()
         body = response.json()
-        return NodeInfo(node_id=body["node_id"], role=body["role"])
+        return NodeInfo(node_id=body["node_id"], role=body["role"], status=body["status"])
 
     def connect(self) -> NodeInfo:
         self.node = self._recover() or self._register()
@@ -143,8 +150,45 @@ class NodeAgent:
         )
         response.raise_for_status()
         body = response.json()
-        self.node = NodeInfo(node_id=body["node_id"], role=body["role"])
+        self.node = NodeInfo(
+            node_id=body["node_id"], role=body["role"], status=body["status"]
+        )
         return self.node
+
+    def process_test_task(self) -> Optional[Dict[str, Union[str, int, bool]]]:
+        if self.node is None:
+            raise RuntimeError("Connect to the provisioning server before claiming tasks")
+        challenge_id, signature = self._challenge(
+            "claim_test_task", self.node.node_id
+        )
+        response = self.client.post(
+            f"/v1/nodes/{self.node.node_id}/test-tasks/claim",
+            json={"challenge_id": challenge_id, "signature": signature},
+        )
+        if response.status_code == 204:
+            return None
+        response.raise_for_status()
+        task = response.json()
+        item_count = task["end_exclusive"] - task["start_inclusive"]
+        sum_squares = sum(
+            item * item
+            for item in range(task["start_inclusive"], task["end_exclusive"])
+        )
+        context = f"{task['task_id']}:{item_count}:{sum_squares}"
+        challenge_id, signature = self._challenge(
+            "complete_test_task", self.node.node_id, context
+        )
+        completion = self.client.post(
+            f"/v1/nodes/{self.node.node_id}/test-tasks/{task['task_id']}/complete",
+            json={
+                "challenge_id": challenge_id,
+                "item_count": item_count,
+                "sum_squares": sum_squares,
+                "signature": signature,
+            },
+        )
+        completion.raise_for_status()
+        return completion.json()
 
     @staticmethod
     def hardware_report() -> Dict[str, Union[str, int, None]]:
@@ -162,14 +206,46 @@ class NodeAgent:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Join and monitor a DistributedCompute node")
-    parser.add_argument("--server", required=True, help="Provisioning API base URL")
+    parser.add_argument("--server", help="Provisioning API base URL")
     parser.add_argument("--interval", type=float, default=60, help="Heartbeat interval in seconds")
     parser.add_argument(
         "--once", action="store_true", help="Register/recover, send one heartbeat, then exit"
     )
+    service_actions = parser.add_mutually_exclusive_group()
+    service_actions.add_argument("--install-service", action="store_true")
+    service_actions.add_argument("--uninstall-service", action="store_true")
+    service_actions.add_argument("--service-status", action="store_true")
     args = parser.parse_args()
     if args.interval <= 0:
         parser.error("--interval must be greater than zero")
+    if args.once and (args.install_service or args.uninstall_service or args.service_status):
+        parser.error("--once cannot be combined with a service command")
+
+    try:
+        if args.install_service:
+            if not args.server:
+                parser.error("--install-service requires --server")
+            from .macos_service import install_service
+
+            install_service(args.server, args.interval)
+            print("Node Agent installed and started as a per-user LaunchAgent")
+            return
+        if args.uninstall_service:
+            from .macos_service import uninstall_service
+
+            uninstall_service()
+            print("Node Agent service removed; Keychain identity was preserved")
+            return
+        if args.service_status:
+            from .macos_service import service_status
+
+            print(service_status())
+            return
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+        parser.exit(1, f"Node Agent service operation failed: {exc}\n")
+
+    if not args.server:
+        parser.error("--server is required unless using a service command")
 
     try:
         agent = NodeAgent(args.server, KeychainIdentityStore())
@@ -178,11 +254,19 @@ def main() -> None:
 
     try:
         node = agent.connect()
-        print(f"Node {node.node_id} connected with role {node.role}", flush=True)
+        print(
+            f"Node {node.node_id} is {node.status} with role {node.role}", flush=True
+        )
         while True:
             try:
                 agent.heartbeat()
                 print(f"Heartbeat sent for node {node.node_id}", flush=True)
+                task_result = agent.process_test_task()
+                if task_result:
+                    print(
+                        f"Verified test shard {task_result['task_id']} completed",
+                        flush=True,
+                    )
             except httpx.HTTPError as exc:
                 if args.once:
                     raise

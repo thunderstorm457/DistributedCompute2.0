@@ -79,7 +79,7 @@ class NodeAgent:
         self.client = client or httpx.Client(
             base_url=server_url.rstrip("/"), timeout=15, transport=transport
         )
-        self.node: NodeInfo | None = None
+        self.node: Optional[NodeInfo] = None
 
     def _challenge(self, action: str, node_id: str = "") -> tuple[str, str]:
         response = self.client.post(
@@ -94,7 +94,7 @@ class NodeAgent:
         signature = base64.b64encode(self.private_key.sign(message)).decode("ascii")
         return challenge["challenge_id"], signature
 
-    def _recover(self) -> NodeInfo | None:
+    def _recover(self) -> Optional[NodeInfo]:
         challenge_id, signature = self._challenge("recover")
         response = self.client.post(
             "/v1/nodes/recover",

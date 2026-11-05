@@ -6,7 +6,7 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Dict, Optional, Protocol, Union
 
 import httpx
 from cryptography.hazmat.primitives import serialization
@@ -65,8 +65,8 @@ class NodeAgent:
         self,
         server_url: str,
         identity_store: IdentityStore,
-        transport: httpx.BaseTransport | None = None,
-        client: httpx.Client | None = None,
+        transport: Optional[httpx.BaseTransport] = None,
+        client: Optional[httpx.Client] = None,
     ):
         self.private_key = identity_store.load_or_create_private_key()
         self.public_key = base64.b64encode(
@@ -147,7 +147,7 @@ class NodeAgent:
         return self.node
 
     @staticmethod
-    def hardware_report() -> dict[str, str | int | None]:
+    def hardware_report() -> Dict[str, Union[str, int, None]]:
         return {
             "agent_version": "0.1.0",
             "platform": platform.platform(),

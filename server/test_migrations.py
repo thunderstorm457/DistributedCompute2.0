@@ -48,6 +48,8 @@ class MigrationTests(unittest.TestCase):
             self.assertTrue(inspector.has_table("test_runs"))
             self.assertTrue(inspector.has_table("test_shards"))
             self.assertTrue(inspector.has_table("alembic_version"))
+            self.assertIn("logical_cpu_cores", {column["name"] for column in inspector.get_columns("nodes")})
+            self.assertIn("gpu_cores", {column["name"] for column in inspector.get_columns("nodes")})
             self.assertIn(
                 "ix_nodes_public_key",
                 {index["name"] for index in inspector.get_indexes("nodes")},
@@ -92,11 +94,13 @@ class MigrationTests(unittest.TestCase):
             with engine.connect() as connection:
                 node = connection.execute(
                     text(
-                        "SELECT enrollment_status, hardware FROM nodes WHERE id = 'node-1'"
+                        "SELECT enrollment_status, hardware, logical_cpu_cores, ram_bytes "
+                        "FROM nodes WHERE id = 'node-1'"
                     )
                 ).one()
                 self.assertEqual(node.enrollment_status, "approved")
                 self.assertEqual(node.hardware, '{"cpu_cores": 4}')
+                self.assertEqual(node.logical_cpu_cores, 4)
         finally:
             engine.dispose()
 

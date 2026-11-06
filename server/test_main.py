@@ -163,7 +163,7 @@ class ProvisioningApiTests(unittest.TestCase):
             approved = self.client.put(
                 f"/v1/admin/nodes/{node_id}/enrollment",
                 json={"status": "approved"},
-                headers={"Authorization": "Bearer test-secret"},
+                headers={"X-Admin-Passcode": "test-secret"},
             )
             denied = self.client.put(
                 f"/v1/admin/nodes/{node_id}/role", json={"role": "id_storage"}
@@ -172,15 +172,15 @@ class ProvisioningApiTests(unittest.TestCase):
             assigned = self.client.put(
                 f"/v1/admin/nodes/{node_id}/role",
                 json={"role": "id_storage"},
-                headers={"Authorization": "Bearer test-secret"},
+                headers={"X-Admin-Passcode": "test-secret"},
             )
             economy_role = self.client.put(
                 f"/v1/admin/nodes/{node_id}/role",
                 json={"role": "economy"},
-                headers={"Authorization": "Bearer test-secret"},
+                headers={"X-Admin-Passcode": "test-secret"},
             )
             nodes = self.client.get(
-                "/v1/admin/nodes", headers={"Authorization": "Bearer test-secret"}
+                "/v1/admin/nodes", headers={"X-Admin-Passcode": "test-secret"}
             )
         self.assertEqual(assigned.status_code, 200)
         self.assertEqual(approved.json()["status"], "approved")
@@ -189,6 +189,111 @@ class ProvisioningApiTests(unittest.TestCase):
         self.assertEqual(economy_role.json()["role"], "economy")
         self.assertEqual(nodes.status_code, 200)
         self.assertEqual(nodes.json()[0]["health"], "online")
+
+    def test_admin_passcode_header_works_without_bearer_scheme(self):
+        with patch.dict(os.environ, {"PROVISIONING_ADMIN_TOKEN": "test-secret"}):
+            response = self.client.get(
+                "/v1/admin/nodes",
+                headers={"X-Admin-Passcode": "test-secret"},
+            )
+        self.assertEqual(response.status_code, 200)
+
+    def test_admin_summary_aggregates_capacity_and_reports_missing_fields(self):
+        now = datetime.now().astimezone()
+        nodes = [
+            main.Node(
+                id="capacity-node-1",
+                public_key="capacity-key-1",
+                role="compute",
+                enrollment_status="approved",
+                hardware={"logical_cpu_cores": 8, "ram_bytes": 16 * 1024**3},
+                logical_cpu_cores=8,
+                ram_bytes=16 * 1024**3,
+                storage_total_bytes=1_000_000_000_000,
+                storage_available_bytes=500_000_000_000,
+                gpu_cores=10,
+                registered_at=now,
+                last_seen=now,
+            ),
+            main.Node(
+                id="capacity-node-2",
+                public_key="capacity-key-2",
+                role="provisioning",
+                enrollment_status="approved",
+                hardware={"logical_cpu_count": 4},
+                logical_cpu_cores=4,
+                ram_bytes=None,
+                storage_total_bytes=None,
+                storage_available_bytes=None,
+                gpu_cores=None,
+                registered_at=now,
+                last_seen=now,
+            ),
+        ]
+        with self.sessions() as db:
+            db.add_all(nodes)
+            db.commit()
+        for node in nodes:
+            main.record_presence(node.id, now)
+
+        with patch.dict(os.environ, {"PROVISIONING_ADMIN_TOKEN": "test-secret"}):
+            response = self.client.get(
+                "/v1/admin/summary",
+                headers={"X-Admin-Passcode": "test-secret"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        summary = response.json()
+        self.assertEqual(summary["registered_nodes"], 2)
+        self.assertEqual(summary["online_nodes"], 2)
+        self.assertEqual(summary["nodes_by_role"]["compute"], 1)
+        self.assertEqual(summary["nodes_by_role"]["provisioning"], 1)
+        capacity = summary["registered_capacity"]
+        self.assertEqual(capacity["logical_cpu_cores"], 12)
+        self.assertEqual(capacity["ram_bytes"], 16 * 1024**3)
+        self.assertEqual(capacity["storage_total_bytes"], 1_000_000_000_000)
+        self.assertEqual(capacity["storage_available_bytes"], 500_000_000_000)
+        self.assertEqual(capacity["gpu_cores"], 10)
+        self.assertEqual(capacity["nodes_reporting_ram"], 1)
+        self.assertEqual(capacity["nodes_reporting_gpu"], 1)
+
+    def test_agent_recovery_refreshes_capacity_in_admin_summary(self):
+        agent = NodeAgent("http://testserver", MemoryIdentityStore(), client=self.client)
+        initial_hardware = {
+            "logical_cpu_cores": 4,
+            "ram_bytes": 8 * 1024**3,
+            "storage_total_bytes": 500_000_000_000,
+            "storage_available_bytes": 250_000_000_000,
+            "gpu_cores": None,
+        }
+        refreshed_hardware = {
+            "logical_cpu_cores": 8,
+            "ram_bytes": 16 * 1024**3,
+            "storage_total_bytes": 1_000_000_000_000,
+            "storage_available_bytes": 750_000_000_000,
+            "gpu_cores": 12,
+        }
+        with patch.object(NodeAgent, "hardware_report", return_value=initial_hardware):
+            node = agent.connect()
+        with patch.object(NodeAgent, "hardware_report", return_value=refreshed_hardware):
+            recovered = agent.connect()
+
+        self.assertEqual(recovered.node_id, node.node_id)
+        with self.sessions() as db:
+            stored = db.get(main.Node, node.node_id)
+            self.assertEqual(stored.logical_cpu_cores, 8)
+            self.assertEqual(stored.ram_bytes, 16 * 1024**3)
+            self.assertEqual(stored.gpu_cores, 12)
+
+        with patch.dict(os.environ, {"PROVISIONING_ADMIN_TOKEN": "test-secret"}):
+            summary = self.client.get(
+                "/v1/admin/summary",
+                headers={"X-Admin-Passcode": "test-secret"},
+            ).json()
+        self.assertEqual(summary["registered_nodes"], 1)
+        self.assertEqual(summary["registered_capacity"]["logical_cpu_cores"], 8)
+        self.assertEqual(summary["registered_capacity"]["gpu_cores"], 12)
+        agent.close()
 
     def test_registered_identity_can_recover_its_node_id(self):
         challenge = self.issue_challenge()
@@ -246,12 +351,12 @@ class ProvisioningApiTests(unittest.TestCase):
             rejected = self.client.put(
                 f"/v1/admin/nodes/{node_id}/enrollment",
                 json={"status": "rejected"},
-                headers={"Authorization": "Bearer test-secret"},
+                headers={"X-Admin-Passcode": "test-secret"},
             )
             role = self.client.put(
                 f"/v1/admin/nodes/{node_id}/role",
                 json={"role": "provisioning"},
-                headers={"Authorization": "Bearer test-secret"},
+                headers={"X-Admin-Passcode": "test-secret"},
             )
         self.assertEqual(rejected.status_code, 200)
         self.assertEqual(role.status_code, 409)
@@ -279,7 +384,7 @@ class ProvisioningApiTests(unittest.TestCase):
             created = self.client.post(
                 "/v1/admin/test-runs",
                 json={"total_items": 1001, "shard_count": 2},
-                headers={"Authorization": "Bearer test-secret"},
+                headers={"X-Admin-Passcode": "test-secret"},
             )
         self.assertEqual(created.status_code, 201)
         initial = created.json()
@@ -300,7 +405,7 @@ class ProvisioningApiTests(unittest.TestCase):
         with patch.dict(os.environ, {"PROVISIONING_ADMIN_TOKEN": "test-secret"}):
             result = self.client.get(
                 f"/v1/admin/test-runs/{initial['run_id']}",
-                headers={"Authorization": "Bearer test-secret"},
+                headers={"X-Admin-Passcode": "test-secret"},
             )
         self.assertEqual(result.status_code, 200)
         summary = result.json()
@@ -320,7 +425,7 @@ class ProvisioningApiTests(unittest.TestCase):
             insufficient_nodes = self.client.post(
                 "/v1/admin/test-runs",
                 json=request_body,
-                headers={"Authorization": "Bearer test-secret"},
+                headers={"X-Admin-Passcode": "test-secret"},
             )
         self.assertEqual(insufficient_nodes.status_code, 409)
         agent.close()
@@ -332,7 +437,7 @@ class ProvisioningApiTests(unittest.TestCase):
             created = self.client.post(
                 "/v1/admin/test-runs",
                 json={"total_items": 100, "shard_count": 2},
-                headers={"Authorization": "Bearer test-secret"},
+                headers={"X-Admin-Passcode": "test-secret"},
             )
         run = created.json()
 
@@ -369,7 +474,7 @@ class ProvisioningApiTests(unittest.TestCase):
         with patch.dict(os.environ, {"PROVISIONING_ADMIN_TOKEN": "test-secret"}):
             status = self.client.get(
                 f"/v1/admin/test-runs/{run['run_id']}",
-                headers={"Authorization": "Bearer test-secret"},
+                headers={"X-Admin-Passcode": "test-secret"},
             )
         self.assertEqual(status.json()["status"], "failed")
         first_agent.close()

@@ -1,12 +1,17 @@
 import argparse
 import base64
+import hashlib
+import json
 import os
 import platform
+import re
+import shutil
 import subprocess
 import sys
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Optional, Protocol, Union
 
 import httpx
@@ -16,6 +21,24 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 KEYCHAIN_SERVICE = "DistributedCompute.NodeAgent"
 KEYCHAIN_ACCOUNT = "node-identity-v1"
+GPU_CORE_KEYS = ("sppci_cores", "spdisplays_cores", "gpu_core_count", "gpu_cores")
+
+
+def _extract_gpu_core_counts(value):
+    if isinstance(value, dict):
+        for key in GPU_CORE_KEYS:
+            if key in value:
+                match = re.search(r"\d+", str(value[key]))
+                if match:
+                    return [int(match.group())]
+        return [
+            count
+            for child in value.values()
+            for count in _extract_gpu_core_counts(child)
+        ]
+    if isinstance(value, list):
+        return [count for child in value for count in _extract_gpu_core_counts(child)]
+    return []
 
 
 class IdentityStore(Protocol):
@@ -137,8 +160,34 @@ class NodeAgent:
         return NodeInfo(node_id=body["node_id"], role=body["role"], status=body["status"])
 
     def connect(self) -> NodeInfo:
-        self.node = self._recover() or self._register()
+        recovered = self._recover()
+        if recovered is None:
+            self.node = self._register()
+        else:
+            self.node = recovered
+            self.update_hardware()
         return self.node
+
+    def update_hardware(self) -> None:
+        if self.node is None:
+            raise RuntimeError("Connect to the provisioning server before updating hardware")
+        hardware = self.hardware_report()
+        serialized = json.dumps(
+            hardware, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+        context = hashlib.sha256(serialized).hexdigest()
+        challenge_id, signature = self._challenge(
+            "update_hardware", self.node.node_id, context
+        )
+        response = self.client.put(
+            f"/v1/nodes/{self.node.node_id}/hardware",
+            json={
+                "challenge_id": challenge_id,
+                "hardware": hardware,
+                "signature": signature,
+            },
+        )
+        response.raise_for_status()
 
     def heartbeat(self) -> NodeInfo:
         if self.node is None:
@@ -192,11 +241,50 @@ class NodeAgent:
 
     @staticmethod
     def hardware_report() -> Dict[str, Union[str, int, None]]:
+        ram_bytes = None
+        gpu_cores = None
+        if sys.platform == "darwin":
+            try:
+                memory = subprocess.run(
+                    ["sysctl", "-n", "hw.memsize"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                ram_bytes = int(memory.stdout.strip())
+            except (OSError, ValueError, subprocess.SubprocessError):
+                pass
+            try:
+                displays = subprocess.run(
+                    ["system_profiler", "SPDisplaysDataType", "-json"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                )
+                core_counts = _extract_gpu_core_counts(json.loads(displays.stdout))
+                gpu_cores = sum(core_counts) if core_counts else None
+            except (OSError, ValueError, subprocess.SubprocessError):
+                pass
+
+        try:
+            storage = shutil.disk_usage(Path.home())
+            storage_total_bytes = storage.total
+            storage_available_bytes = storage.free
+        except OSError:
+            storage_total_bytes = None
+            storage_available_bytes = None
+
         return {
             "agent_version": "0.1.0",
             "platform": platform.platform(),
             "architecture": platform.machine(),
-            "logical_cpu_count": os.cpu_count(),
+            "logical_cpu_cores": os.cpu_count(),
+            "ram_bytes": ram_bytes,
+            "storage_total_bytes": storage_total_bytes,
+            "storage_available_bytes": storage_available_bytes,
+            "gpu_cores": gpu_cores,
         }
 
     def close(self) -> None:

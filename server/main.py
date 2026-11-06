@@ -1,5 +1,6 @@
 import base64
 import binascii
+import hashlib
 import json
 import os
 import secrets
@@ -105,6 +106,11 @@ class Node(Base):
         server_default=EnrollmentStatus.PENDING.value,
     )
     hardware: Mapped[dict[str, Any]] = mapped_column(JSON)
+    logical_cpu_cores: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    ram_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    storage_total_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    storage_available_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    gpu_cores: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     registered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     last_seen: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
@@ -183,13 +189,18 @@ class RegistrationRequest(BaseModel):
     @field_validator("hardware")
     @classmethod
     def validate_hardware_size(cls, value):
-        try:
-            encoded = json.dumps(value, separators=(",", ":"), allow_nan=False).encode()
-        except (TypeError, ValueError) as exc:
-            raise ValueError("Hardware report must contain valid JSON values") from exc
-        if len(encoded) > MAX_HARDWARE_REPORT_BYTES:
-            raise ValueError("Hardware report must be 8 KiB or smaller")
-        return value
+        return validate_hardware_report(value)
+
+
+class HardwareUpdateRequest(BaseModel):
+    challenge_id: str
+    hardware: dict[str, Any]
+    signature: str = Field(min_length=80, max_length=100)
+
+    @field_validator("hardware")
+    @classmethod
+    def validate_hardware_size(cls, value):
+        return validate_hardware_report(value)
 
 
 class RecoveryRequest(BaseModel):
@@ -281,6 +292,26 @@ class AdminNodeResponse(NodeResponse):
     health: str
 
 
+class ResourceTotals(BaseModel):
+    logical_cpu_cores: int
+    ram_bytes: int
+    storage_total_bytes: int
+    storage_available_bytes: int
+    gpu_cores: int
+    nodes_reporting_cpu: int
+    nodes_reporting_ram: int
+    nodes_reporting_storage: int
+    nodes_reporting_gpu: int
+
+
+class AdminSummaryResponse(BaseModel):
+    generated_at: datetime
+    registered_nodes: int
+    online_nodes: int
+    nodes_by_role: dict[str, int]
+    registered_capacity: ResourceTotals
+
+
 def decode_base64(value: str, expected_bytes: int, field: str) -> bytes:
     try:
         decoded = base64.b64decode(value, validate=True)
@@ -294,6 +325,48 @@ def decode_base64(value: str, expected_bytes: int, field: str) -> bytes:
 def canonical_public_key(value: str) -> str:
     raw_key = decode_base64(value, 32, "public key")
     return base64.b64encode(raw_key).decode("ascii")
+
+
+def validate_hardware_report(value: dict[str, Any]) -> dict[str, Any]:
+    try:
+        encoded = json.dumps(value, separators=(",", ":"), allow_nan=False).encode()
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Hardware report must contain valid JSON values") from exc
+    if len(encoded) > MAX_HARDWARE_REPORT_BYTES:
+        raise ValueError("Hardware report must be 8 KiB or smaller")
+    return value
+
+
+def hardware_report_digest(hardware: dict[str, Any]) -> str:
+    serialized = json.dumps(
+        hardware,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode()
+    return hashlib.sha256(serialized).hexdigest()
+
+
+def reported_capacity(hardware: dict[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        value = hardware.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return None
+
+
+def set_node_capacity(node: Node, hardware: dict[str, Any]) -> None:
+    node.logical_cpu_cores = reported_capacity(
+        hardware, "logical_cpu_cores", "logical_cpu_count", "cpu_cores"
+    )
+    node.ram_bytes = reported_capacity(hardware, "ram_bytes", "memory_bytes")
+    node.storage_total_bytes = reported_capacity(
+        hardware, "storage_total_bytes", "storage_bytes"
+    )
+    node.storage_available_bytes = reported_capacity(
+        hardware, "storage_available_bytes"
+    )
+    node.gpu_cores = reported_capacity(hardware, "gpu_cores", "gpu_core_count")
 
 
 def signed_message(
@@ -452,6 +525,24 @@ def get_recent_online_node_ids(limit: int):
     return [node_id for node_id, _ in online[:limit]]
 
 
+def count_online_nodes() -> int:
+    if redis_client is not None:
+        try:
+            return redis_client.zcount(
+                "distributedcompute:online-nodes",
+                datetime.now(timezone.utc).timestamp() - NODE_STALE_AFTER.total_seconds(),
+                "+inf",
+            )
+        except RedisError as exc:
+            raise HTTPException(status_code=503, detail="Presence storage is unavailable") from exc
+    now = datetime.now(timezone.utc)
+    with _local_state_lock:
+        return sum(
+            now - last_seen <= NODE_STALE_AFTER
+            for last_seen in _local_presence.values()
+        )
+
+
 def verify_and_consume_challenge(
     challenge_id: str,
     public_key: str,
@@ -476,16 +567,11 @@ def verify_and_consume_challenge(
     except InvalidSignature as exc:
         raise HTTPException(status_code=401, detail="Invalid signature") from exc
 
-def require_admin(authorization: str | None) -> None:
+def require_admin(admin_passcode: str | None) -> None:
     admin_token = os.getenv("PROVISIONING_ADMIN_TOKEN")
     if not admin_token:
         raise HTTPException(status_code=503, detail="Administrative access is not configured")
-    supplied_token = (
-        authorization.removeprefix("Bearer ")
-        if authorization and authorization.startswith("Bearer ")
-        else ""
-    )
-    if not secrets.compare_digest(supplied_token, admin_token):
+    if not secrets.compare_digest(admin_passcode or "", admin_token):
         raise HTTPException(status_code=403, detail="Administrative access required")
 
 
@@ -638,6 +724,7 @@ def register_node(
         registered_at=now,
         last_seen=now,
     )
+    set_node_capacity(node, registration.hardware)
     db.add(node)
     db.commit()
     record_presence(node.id, now)
@@ -676,14 +763,39 @@ def heartbeat(node_id: str, request: HeartbeatRequest, db: Session = Depends(get
     return node_response(node, last_seen=now)
 
 
+@app.put("/v1/nodes/{node_id}/hardware", response_model=NodeResponse)
+def update_node_hardware(
+    node_id: str,
+    request: HardwareUpdateRequest,
+    db: Session = Depends(get_db),
+):
+    node = db.get(Node, node_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    if node.enrollment_status == EnrollmentStatus.REJECTED.value:
+        raise HTTPException(status_code=403, detail="Node enrollment was rejected")
+    verify_and_consume_challenge(
+        request.challenge_id,
+        node.public_key,
+        request.signature,
+        "update_hardware",
+        node_id,
+        hardware_report_digest(request.hardware),
+    )
+    node.hardware = request.hardware
+    set_node_capacity(node, request.hardware)
+    db.commit()
+    return node_response(node)
+
+
 @app.get("/v1/admin/nodes", response_model=list[AdminNodeResponse])
 def list_nodes(
-    authorization: str | None = Header(default=None),
+    admin_passcode: str | None = Header(default=None, alias="X-Admin-Passcode"),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
 ):
-    require_admin(authorization)
+    require_admin(admin_passcode)
     nodes = db.scalars(
         select(Node).order_by(Node.registered_at.desc()).limit(limit).offset(offset)
     ).all()
@@ -703,14 +815,59 @@ def list_nodes(
     return response
 
 
+@app.get("/v1/admin/summary", response_model=AdminSummaryResponse)
+def admin_summary(
+    admin_passcode: str | None = Header(default=None, alias="X-Admin-Passcode"),
+    db: Session = Depends(get_db),
+):
+    require_admin(admin_passcode)
+    aggregate = db.execute(
+        select(
+            func.count(Node.id),
+            func.coalesce(func.sum(Node.logical_cpu_cores), 0),
+            func.coalesce(func.sum(Node.ram_bytes), 0),
+            func.coalesce(func.sum(Node.storage_total_bytes), 0),
+            func.coalesce(func.sum(Node.storage_available_bytes), 0),
+            func.coalesce(func.sum(Node.gpu_cores), 0),
+            func.count(Node.logical_cpu_cores),
+            func.count(Node.ram_bytes),
+            func.count(Node.storage_total_bytes),
+            func.count(Node.gpu_cores),
+        )
+    ).one()
+    nodes_by_role = {role.value: 0 for role in NodeRole}
+    for role, count in db.execute(
+        select(Node.role, func.count(Node.id)).group_by(Node.role)
+    ):
+        nodes_by_role[role] = count
+
+    return AdminSummaryResponse(
+        generated_at=datetime.now(timezone.utc),
+        registered_nodes=aggregate[0],
+        online_nodes=count_online_nodes(),
+        nodes_by_role=nodes_by_role,
+        registered_capacity=ResourceTotals(
+            logical_cpu_cores=aggregate[1],
+            ram_bytes=aggregate[2],
+            storage_total_bytes=aggregate[3],
+            storage_available_bytes=aggregate[4],
+            gpu_cores=aggregate[5],
+            nodes_reporting_cpu=aggregate[6],
+            nodes_reporting_ram=aggregate[7],
+            nodes_reporting_storage=aggregate[8],
+            nodes_reporting_gpu=aggregate[9],
+        ),
+    )
+
+
 @app.put("/v1/admin/nodes/{node_id}/role", response_model=NodeResponse)
 def assign_role(
     node_id: str,
     request: RoleRequest,
-    authorization: str | None = Header(default=None),
+    admin_passcode: str | None = Header(default=None, alias="X-Admin-Passcode"),
     db: Session = Depends(get_db),
 ):
-    require_admin(authorization)
+    require_admin(admin_passcode)
 
     node = db.get(Node, node_id)
     if node is None:
@@ -726,10 +883,10 @@ def assign_role(
 def decide_enrollment(
     node_id: str,
     request: EnrollmentRequest,
-    authorization: str | None = Header(default=None),
+    admin_passcode: str | None = Header(default=None, alias="X-Admin-Passcode"),
     db: Session = Depends(get_db),
 ):
-    require_admin(authorization)
+    require_admin(admin_passcode)
 
     node = db.get(Node, node_id)
     if node is None:
@@ -744,10 +901,10 @@ def decide_enrollment(
 def create_test_run(
     request: Request,
     run_request: TestRunCreateRequest,
-    authorization: str | None = Header(default=None),
+    admin_passcode: str | None = Header(default=None, alias="X-Admin-Passcode"),
     db: Session = Depends(get_db),
 ):
-    require_admin(authorization)
+    require_admin(admin_passcode)
     candidate_ids = get_recent_online_node_ids(MAX_TEST_NODE_CANDIDATES)
     online_nodes = db.scalars(
         select(Node)
@@ -802,10 +959,10 @@ def create_test_run(
 @app.get("/v1/admin/test-runs/{run_id}", response_model=TestRunResponse)
 def get_test_run(
     run_id: str,
-    authorization: str | None = Header(default=None),
+    admin_passcode: str | None = Header(default=None, alias="X-Admin-Passcode"),
     db: Session = Depends(get_db),
 ):
-    require_admin(authorization)
+    require_admin(admin_passcode)
     run = db.get(TestRun, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Test run not found")

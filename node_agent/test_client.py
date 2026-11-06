@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import unittest
 import uuid
@@ -7,7 +8,7 @@ from datetime import datetime, timezone
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from node_agent.client import NodeAgent
+from node_agent.client import NodeAgent, _extract_gpu_core_counts
 
 
 class MemoryIdentityStore:
@@ -24,6 +25,7 @@ class FakeProvisioningServer:
         self.nodes = {}
         self.registrations = 0
         self.heartbeats = 0
+        self.hardware_updates = 0
 
     def __call__(self, request):
         body = json.loads(request.content or b"{}")
@@ -57,6 +59,7 @@ class FakeProvisioningServer:
                 "node_id": str(uuid.uuid4()),
                 "role": "compute",
                 "status": "approved",
+                "hardware": body["hardware"],
                 "registered_at": now,
                 "last_seen": now,
             }
@@ -71,16 +74,31 @@ class FakeProvisioningServer:
             node["last_seen"] = datetime.now(timezone.utc).isoformat()
             return httpx.Response(200, json=node)
 
+        if request.url.path.endswith("/hardware"):
+            node_id = request.url.path.split("/")[-2]
+            serialized = json.dumps(
+                body["hardware"], sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode()
+            context = hashlib.sha256(serialized).hexdigest()
+            challenge = self._verify(body, "update_hardware", node_id, context)
+            node = self.nodes[challenge["public_key"]]
+            node["hardware"] = body["hardware"]
+            self.hardware_updates += 1
+            return httpx.Response(200, json=node)
+
         return httpx.Response(404)
 
-    def _verify(self, body, action, node_id=""):
+    def _verify(self, body, action, node_id="", context=""):
         challenge = self.challenges[body["challenge_id"]]
         if challenge["used"]:
             return httpx.Response(401)
         message = (
             f"distributedcompute:v1:{action}:{node_id}:"
             f"{body['challenge_id']}:{challenge['nonce']}"
-        ).encode()
+        )
+        if context:
+            message = f"{message}:{context}"
+        message = message.encode()
         public_key = base64.b64decode(challenge["public_key"])
         signature = base64.b64decode(body["signature"])
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -91,6 +109,23 @@ class FakeProvisioningServer:
 
 
 class NodeAgentTests(unittest.TestCase):
+    def test_extracts_gpu_core_counts_from_system_profiler_json(self):
+        report = {
+            "SPDisplaysDataType": [
+                {"sppci_model": "Apple GPU", "sppci_cores": "10"},
+                {"sppci_model": "External GPU", "sppci_cores": "24 cores"},
+            ]
+        }
+        self.assertEqual(_extract_gpu_core_counts(report), [10, 24])
+
+    def test_hardware_report_has_standard_capacity_fields(self):
+        report = NodeAgent.hardware_report()
+        self.assertIn("logical_cpu_cores", report)
+        self.assertIn("ram_bytes", report)
+        self.assertIn("storage_total_bytes", report)
+        self.assertIn("storage_available_bytes", report)
+        self.assertIn("gpu_cores", report)
+
     def test_agent_registers_recovers_and_sends_heartbeats(self):
         server = FakeProvisioningServer()
         agent = NodeAgent(
@@ -110,6 +145,7 @@ class NodeAgentTests(unittest.TestCase):
             recovered = agent.connect()
             self.assertEqual(recovered.node_id, first.node_id)
             self.assertEqual(server.registrations, 1)
+            self.assertEqual(server.hardware_updates, 1)
         finally:
             agent.close()
 

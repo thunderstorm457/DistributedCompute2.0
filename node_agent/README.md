@@ -2,8 +2,12 @@
 
 The initial Node Agent prototype registers or recovers a node identity, then
 sends signed heartbeats. On macOS, the private Ed25519 key is stored in
-Keychain. It reports basic platform details for now; NodeScout integration and
-workload execution are not included yet.
+Keychain. At registration and identity recovery it submits a signed report of
+logical CPU cores, total RAM when available, home-volume total/free storage,
+and Apple GPU core counts when `system_profiler` exposes them. These are
+self-reported snapshots, not benchmarks or guarantees of currently available
+capacity. NodeScout integration and user workload execution are not included
+yet.
 
 ## Install on macOS
 

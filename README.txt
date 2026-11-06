@@ -35,7 +35,10 @@ Node Architecture
 
 Every participating computer runs the same core Node Agent. The provisioning system determines which role each computer is assigned.
 
-There are four primary node roles:
+The architecture defines five node roles. In the current prototype, compute
+nodes can register, heartbeat, and run the built-in diagnostic workload. The
+other roles are currently assignable labels; their dedicated services are not
+implemented yet.
 
 1. Main Compute Nodes
 
@@ -64,6 +67,13 @@ Private cryptographic keys remain on the volunteer's computer.
 These help distribute computational workloads across available nodes.
 
 They assist with preventing individual nodes from becoming overloaded and help the network make better use of its available computing resources.
+
+5. Economy Nodes
+
+These are intended to independently calculate and attest to resource quotes
+and settlements from verified task receipts. They must not be trusted to mint
+credits or edit balances. The current repository has a CPU/RAM quote calculator
+and an economy role label, but no receipt quorum or credit ledger.
 
 How Volunteers Join
 
@@ -223,10 +233,11 @@ PostgreSQL-compatible schema migrations and Redis-backed ephemeral node state.
 Mac Node Agent with Keychain identity storage and a development LaunchAgent installer.
 CPU and memory Compute Credit quote and settlement calculations.
 An admin-only distributed `sum_squares` diagnostic that requires distinct online compute nodes and verifies shard coverage/results.
+An admin summary endpoint that totals self-reported CPU, RAM, storage, and GPU capacity, including counts of nodes reporting each value. The Node Agent refreshes this hardware report when it recovers an identity.
 
 The target product is a serverless-style compute grid: users submit bounded container workloads, opted-in nodes execute eligible tasks, and contributors earn internal credits for verified resources delivered. A user's credits can pay for capacity across many providers; they do not need to own as many cores as the workload requests. Work must expose parallel tasks or distributed-service behavior to use multiple independent computers; arbitrary containers cannot be split automatically. The initial CPU/RAM credit definition is documented in docs/economics.md.
 
-The repository does not yet include NodeScout benchmarks, a user workload scheduler or isolated container runtime, an auditable credit ledger or economy-node quorum, or a signed and notarized Mac package. The built-in diagnostic is not a user workload runner. The prototypes are not production-ready and must not run arbitrary submitted containers.
+The repository does not yet include NodeScout benchmarks, functioning provisioning/ID-storage/load-balancer/economy services, a user workload scheduler or isolated container runtime, an auditable credit ledger or economy-node quorum, or a signed and notarized Mac package. Hardware capacity totals are self-reported snapshots and are not proof of available resources. The built-in diagnostic is not a user workload runner. The prototypes are not production-ready and must not run arbitrary submitted containers.
 
 The immediate priority is a persistent staging deployment with PostgreSQL and Redis, followed by a sandboxed first workload and verifiable credit accounting.
 

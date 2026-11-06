@@ -76,21 +76,32 @@ signature to `POST /v1/nodes/{node_id}/heartbeat`.
 
 `GET /v1/admin/nodes` returns enrollment status, hardware, and online/offline
 health (a node is offline after five minutes without a heartbeat). Admin
-endpoints require the configured bearer token. The listing supports `limit`
-(up to 500) and `offset` query parameters.
+endpoints accept only the configured passcode in the `X-Admin-Passcode` header.
+In Swagger, fill the `X-Admin-Passcode` field with the passcode only. The
+listing supports `limit` (up to 500) and `offset` query parameters.
+
+`GET /v1/admin/summary` reports registered and online node counts, counts by
+assigned role, and SQL-aggregated registered CPU, RAM, storage, and GPU
+capacity. Capacity totals include a reporting-node count for each resource so
+missing measurements are visible. Values are self-reported at registration
+and refreshed with a signed report when an agent recovers its identity.
+Storage-free space and other changing resources are not continuously sampled.
+`online_nodes` is a liveness count, not a guarantee of immediately schedulable
+capacity.
 
 New volunteer nodes self-register as approved compute nodes. The admin can
 reject a node using `PUT /v1/admin/nodes/{node_id}/enrollment` with
-`{"status":"rejected"}` and the admin bearer token. Rejected nodes cannot
-heartbeat. Infrastructure roles, including `economy`, remain admin-assigned.
-Existing nodes are marked approved by the enrollment migration.
+`{"status":"rejected"}` and the admin passcode header. Rejected nodes cannot
+heartbeat. Non-compute roles remain admin-assigned. Existing nodes are marked
+approved by the enrollment migration.
 
 `PUT /v1/admin/nodes/{node_id}/role` accepts a role (`compute`, `provisioning`,
 `id_storage`, `load_balancer`, or `economy`) with an
-`Authorization: Bearer ...` header. The endpoint is disabled until
-`PROVISIONING_ADMIN_TOKEN` is configured. The `economy` role is reserved for
-future deterministic receipt calculation; the current API has no settlement
-ledger or economy-node quorum.
+`X-Admin-Passcode` header. The endpoint is disabled until
+`PROVISIONING_ADMIN_TOKEN` is configured. All five roles are represented in
+the API, but provisioning, ID-storage, load-balancer, and economy services do
+not yet have their dedicated distributed implementations. Economy-node quorum
+and a credit ledger are not implemented.
 
 ## Admin Split Test
 
@@ -101,7 +112,7 @@ with the admin token:
 
 ```http
 POST /v1/admin/test-runs
-Authorization: Bearer <admin-token>
+X-Admin-Passcode: <admin-passcode>
 Content-Type: application/json
 
 {"total_items":1000000,"shard_count":2}

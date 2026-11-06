@@ -9,8 +9,9 @@ COPY server/requirements.txt server/requirements.txt
 RUN python -m pip install --no-cache-dir -r server/requirements.txt
 
 COPY alembic.ini ./alembic.ini
-COPY server/main.py server/economics.py ./server/
+COPY server/main.py server/economics.py server/scheduler.py ./server/
 COPY server/migrations ./server/migrations
+COPY server/static ./server/static
 
 RUN useradd --create-home --uid 10001 app
 USER app

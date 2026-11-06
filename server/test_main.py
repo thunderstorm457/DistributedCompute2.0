@@ -138,6 +138,13 @@ class ProvisioningApiTests(unittest.TestCase):
         )
         self.assertEqual(registration.status_code, 422)
 
+    def test_admin_dashboard_serves_readable_ui(self):
+        response = self.client.get("/admin")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Logical CPU cores", response.text)
+        self.assertIn("Node roles", response.text)
+        self.assertIn("Distributed diagnostic", response.text)
+
     def test_challenge_endpoint_rate_limit(self):
         last_response = None
         for _ in range(31):

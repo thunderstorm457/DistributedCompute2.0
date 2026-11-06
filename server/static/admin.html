@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>DistributedCompute | Network Admin</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17272b;
+      --muted: #64777b;
+      --line: #d7e1df;
+      --paper: #f3f6f3;
+      --surface: #ffffff;
+      --deep: #173c3e;
+      --deep-2: #245557;
+      --mint: #c9ef9a;
+      --mint-ink: #294d26;
+      --amber: #a76513;
+      --amber-bg: #fff0d6;
+      --red: #a4433b;
+      --red-bg: #ffebe8;
+      --blue: #305c82;
+      --blue-bg: #e8f1f8;
+      --radius: 8px;
+      font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; background: var(--paper); }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    .topbar {
+      min-height: 72px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 14px clamp(18px, 4vw, 56px);
+      background: var(--deep);
+      color: #fff;
+      border-bottom: 4px solid var(--mint);
+    }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .brand-mark {
+      width: 36px; height: 36px; display: grid; place-items: center;
+      border: 1px solid rgba(255,255,255,.4); border-radius: 50%;
+      color: var(--mint); font-weight: 800; font-size: 15px;
+    }
+    .brand-name { font-size: 15px; font-weight: 700; }
+    .brand-meta { margin-top: 3px; color: #bfd0cd; font: 10px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 1px; }
+    .auth { display: flex; align-items: center; gap: 8px; }
+    .auth input {
+      width: min(270px, 34vw); min-width: 130px; height: 38px; padding: 0 11px;
+      color: var(--ink); background: #fff; border: 1px solid #c8d6d3; border-radius: 5px;
+    }
+    .button {
+      min-height: 36px; padding: 0 13px; border: 1px solid transparent;
+      border-radius: 5px; background: var(--deep); color: #fff; font-weight: 650;
+    }
+    .button:hover { background: var(--deep-2); }
+    .button:disabled { opacity: .48; cursor: not-allowed; }
+    .button-light { color: var(--deep); background: #fff; border-color: #b7c9c4; }
+    .button-light:hover { background: #edf4ef; }
+    .button-danger { color: var(--red); background: #fff; border-color: #ecc4be; }
+    .button-small { min-height: 30px; padding: 0 9px; font-size: 12px; }
+
+    main { width: min(1440px, 100%); margin: 0 auto; padding: 26px clamp(16px, 4vw, 56px) 60px; }
+    .page-heading { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 20px; }
+    h1 { margin: 0; font-size: clamp(24px, 3vw, 34px); line-height: 1.1; letter-spacing: 0; }
+    .subtitle { margin: 7px 0 0; color: var(--muted); font-size: 14px; }
+    .connection { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #8d9996; }
+    .dot.live { background: #4a9d5b; box-shadow: 0 0 0 3px #dcefe0; }
+    .notice { min-height: 38px; margin: 0 0 18px; padding: 10px 12px; border: 1px solid var(--line); border-left: 4px solid #9aa9a5; border-radius: 4px; background: #fff; color: var(--muted); font-size: 13px; }
+    .notice.error { border-left-color: var(--red); color: var(--red); background: #fff9f8; }
+    .notice.success { border-left-color: #4a9d5b; color: #2f7040; background: #f6fff7; }
+
+    .metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
+    .metric { min-height: 112px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .metric-label { color: var(--muted); font-size: 12px; font-weight: 650; }
+    .metric-value { margin-top: 12px; font-size: clamp(21px, 2.4vw, 31px); font-weight: 750; line-height: 1; font-variant-numeric: tabular-nums; }
+    .metric-unit { margin-left: 5px; color: var(--muted); font-size: 12px; font-weight: 500; }
+    .metric-note { margin-top: 8px; color: var(--muted); font-size: 11px; }
+
+    .section { margin-top: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+    .section-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 15px 17px; border-bottom: 1px solid var(--line); }
+    h2 { margin: 0; font-size: 16px; letter-spacing: 0; }
+    .section-meta { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .section-body { padding: 16px 17px; }
+    .roles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+    .role { padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: #fbfcfa; }
+    .role-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .role-name { font-size: 13px; font-weight: 700; }
+    .role-count { color: var(--deep); font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .role-description { min-height: 34px; margin-top: 8px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .badge { display: inline-flex; align-items: center; min-height: 20px; padding: 0 7px; border-radius: 99px; background: #e8eeeb; color: #536661; font: 650 10px ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+    .badge-active { background: #e5f4dd; color: #386329; }
+    .badge-prototype { background: var(--amber-bg); color: var(--amber); }
+    .badge-planned { background: #edf0f2; color: #647178; }
+    .badge-centralized { background: var(--blue-bg); color: var(--blue); }
+
+    .table-wrap { width: 100%; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; font-size: 12px; }
+    th { padding: 10px 12px; background: #f7f9f7; color: var(--muted); font-size: 10px; font-weight: 700; text-transform: uppercase; white-space: nowrap; }
+    td { padding: 11px 12px; border-top: 1px solid #e8eeeb; vertical-align: middle; white-space: nowrap; }
+    tbody tr:hover { background: #fafcf9; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums; }
+    .node-id { color: var(--deep); font-size: 11px; }
+    .health { display: inline-flex; align-items: center; gap: 6px; }
+    .health .dot { width: 7px; height: 7px; }
+    .health.online { color: #367448; }
+    .health.offline { color: #777; }
+    .cell-select { min-height: 30px; padding: 0 6px; border: 1px solid #cbd6d2; border-radius: 4px; background: #fff; color: var(--ink); font-size: 12px; }
+    .empty { padding: 28px 14px; text-align: center; color: var(--muted); font-size: 13px; }
+
+    .work-grid { display: grid; grid-template-columns: minmax(230px, .7fr) minmax(0, 1.3fr); gap: 18px; }
+    .form-row { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+    .field { display: grid; gap: 5px; }
+    .field label { color: var(--muted); font-size: 11px; font-weight: 700; }
+    .field input, .field select { height: 36px; min-width: 110px; padding: 0 9px; border: 1px solid #cbd6d2; border-radius: 4px; background: #fff; color: var(--ink); }
+    .test-state { display: flex; align-items: center; gap: 8px; }
+    .run-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .run-stat { padding: 9px 10px; border-radius: 5px; background: #f1f5f2; }
+    .run-stat-label { color: var(--muted); font-size: 10px; }
+    .run-stat-value { margin-top: 4px; font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .progress { height: 7px; overflow: hidden; border-radius: 8px; background: #e5ece8; }
+    .progress > span { display: block; height: 100%; width: 0; background: #7fb75c; transition: width .25s ease; }
+    .shard-table { margin-top: 12px; }
+    .footnote { margin-top: 10px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+    .updated { color: #d0e0dc; font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    @media (max-width: 1020px) {
+      .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .roles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 700px) {
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .auth { width: 100%; }
+      .auth input { width: 100%; flex: 1; }
+      .page-heading { align-items: flex-start; flex-direction: column; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .roles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .work-grid { grid-template-columns: 1fr; }
+      .run-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">D</div>
+      <div>
+        <div class="brand-name">DistributedCompute</div>
+        <div class="brand-meta">NETWORK ADMIN</div>
+      </div>
+    </div>
+    <form class="auth" id="auth-form">
+      <input id="passcode" type="password" autocomplete="current-password" placeholder="Admin passcode" aria-label="Admin passcode" required>
+      <button class="button button-light" type="submit">Connect</button>
+      <button class="button button-light" id="disconnect" type="button" title="Clear passcode">Clear</button>
+    </form>
+  </header>
+
+  <main>
+    <div class="page-heading">
+      <div>
+        <h1>Network overview</h1>
+        <p class="subtitle">Fleet capacity, node roles, and distributed diagnostics.</p>
+      </div>
+      <div class="connection"><span class="dot" id="connection-dot"></span><span id="connection-label">Not connected</span><span class="updated" id="updated-at"></span></div>
+    </div>
+    <div class="notice" id="notice" role="status">Enter the admin passcode to load fleet data.</div>
+
+    <section class="metrics" aria-label="Fleet capacity">
+      <article class="metric"><div class="metric-label">Online nodes</div><div class="metric-value" id="online-nodes">--</div><div class="metric-note" id="registered-nodes">-- registered</div></article>
+      <article class="metric"><div class="metric-label">Logical CPU cores</div><div class="metric-value" id="cpu-cores">--</div><div class="metric-note" id="cpu-reports">-- reporting nodes</div></article>
+      <article class="metric"><div class="metric-label">Reported RAM</div><div class="metric-value" id="ram-total">--</div><div class="metric-note" id="ram-reports">-- reporting nodes</div></article>
+      <article class="metric"><div class="metric-label">Storage</div><div class="metric-value" id="storage-total">--</div><div class="metric-note" id="storage-free">-- free reported</div></article>
+      <article class="metric"><div class="metric-label">GPU cores</div><div class="metric-value" id="gpu-cores">--</div><div class="metric-note" id="gpu-reports">-- reporting nodes</div></article>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><div><h2>Node roles</h2><div class="section-meta">Role labels and implementation status</div></div></div>
+      <div class="section-body"><div class="roles" id="roles"><div class="empty">Connect to load roles.</div></div></div>
+    </section>
+
+    <section class="section">
+      <div class="section-head">
+        <div><h2>Nodes</h2><div class="section-meta">Self-reported capacity from the latest registration or hardware refresh</div></div>
+        <button class="button button-light button-small" id="refresh">Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Node</th><th>Health</th><th>Enrollment</th><th>Role</th><th>CPU</th><th>RAM</th><th>Storage free / total</th><th>GPU cores</th><th></th></tr></thead>
+          <tbody id="nodes"><tr><td class="empty" colspan="9">Connect to load nodes.</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><div><h2>Distributed diagnostic</h2><div class="section-meta">Bounded sum-of-squares shards; requires distinct online compute nodes</div></div></div>
+      <div class="section-body work-grid">
+        <form id="run-form">
+          <div class="form-row">
+            <div class="field"><label for="total-items">Work items</label><input id="total-items" type="number" min="2" max="2000000" value="1000000" required></div>
+            <div class="field"><label for="shard-count">Shards / nodes</label><input id="shard-count" type="number" min="2" max="64" value="2" required></div>
+            <button class="button" id="start-run" type="submit" disabled>Start test</button>
+          </div>
+          <p class="footnote">The scheduler assigns shards to the least-loaded online compute nodes. This diagnostic verifies its arithmetic and assignment, not physical hardware identity or general container execution.</p>
+        </form>
+        <div id="run-panel"><div class="empty">No test run selected.</div></div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const roleNames = {
+      compute: "Compute",
+      provisioning: "Provisioning",
+      id_storage: "ID storage",
+      load_balancer: "Load balancer",
+      economy: "Economy"
+    };
+    let passcode = sessionStorage.getItem("dc-admin-passcode") || "";
+    let onlineNodeCount = 0;
+    let activeRunId = "";
+    let refreshTimer = null;
+
+    const byId = (id) => document.getElementById(id);
+    const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+    })[char]);
+    const integer = (value) => new Intl.NumberFormat().format(value || 0);
+    const bytes = (value) => {
+      if (!value) return "0 B";
+      const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+      let amount = value;
+      let index = 0;
+      while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index += 1; }
+      return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(amount)} ${units[index]}`;
+    };
+    const setNotice = (message, kind = "") => {
+      const notice = byId("notice");
+      notice.textContent = message;
+      notice.className = `notice ${kind}`;
+    };
+
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        ...options,
+        headers: {
+          "X-Admin-Passcode": passcode,
+          ...(options.body ? { "Content-Type": "application/json" } : {}),
+          ...(options.headers || {})
+        }
+      });
+      if (!response.ok) {
+        let detail = `${response.status} ${response.statusText}`;
+        try { detail = (await response.json()).detail || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      if (response.status === 204) return null;
+      return response.json();
+    }
+
+    function renderSummary(summary) {
+      const capacity = summary.registered_capacity;
+      onlineNodeCount = summary.online_nodes;
+      byId("online-nodes").textContent = integer(summary.online_nodes);
+      byId("registered-nodes").textContent = `${integer(summary.registered_nodes)} registered`;
+      byId("cpu-cores").textContent = integer(capacity.logical_cpu_cores);
+      byId("cpu-reports").textContent = `${integer(capacity.nodes_reporting_cpu)} reporting nodes`;
+      byId("ram-total").textContent = bytes(capacity.ram_bytes);
+      byId("ram-reports").textContent = `${integer(capacity.nodes_reporting_ram)} reporting nodes`;
+      byId("storage-total").textContent = bytes(capacity.storage_total_bytes);
+      byId("storage-free").textContent = `${bytes(capacity.storage_available_bytes)} free reported`;
+      byId("gpu-cores").textContent = integer(capacity.gpu_cores);
+      byId("gpu-reports").textContent = `${integer(capacity.nodes_reporting_gpu)} reporting nodes`;
+      byId("updated-at").textContent = `Updated ${new Date(summary.generated_at).toLocaleTimeString()}`;
+      byId("start-run").disabled = summary.online_nodes < 2;
+      const shardInput = byId("shard-count");
+      shardInput.max = Math.max(2, Math.min(64, summary.online_nodes));
+      if (Number(shardInput.value) > Number(shardInput.max)) shardInput.value = shardInput.max;
+
+      const roleEntries = Object.entries(summary.role_capabilities || {});
+      byId("roles").innerHTML = roleEntries.map(([role, info]) => {
+        const statusClass = info.status === "active" ? "badge-active" :
+          (info.status === "prototype" ? "badge-prototype" :
+            (info.status === "centralized" ? "badge-centralized" : "badge-planned"));
+        return `<article class="role"><div class="role-top"><span class="role-name">${escapeHtml(roleNames[role] || role)}</span><span class="role-count">${integer(summary.nodes_by_role[role])}</span></div><div class="role-description">${escapeHtml(info.description)}</div><span class="badge ${statusClass}">${escapeHtml(info.status)}</span></article>`;
+      }).join("");
+    }
+
+    function renderNodes(nodes) {
+      if (!nodes.length) {
+        byId("nodes").innerHTML = '<tr><td class="empty" colspan="9">No nodes registered.</td></tr>';
+        return;
+      }
+      byId("nodes").innerHTML = nodes.map((node) => {
+        const hardware = node.hardware || {};
+        const state = node.health === "online" ? "online" : "offline";
+        const roles = Object.keys(roleNames).map((role) => `<option value="${role}" ${node.role === role ? "selected" : ""}>${escapeHtml(roleNames[role])}</option>`).join("");
+        const reported = (value, formatter) => value === null || value === undefined ? "Not reported" : formatter(value);
+        return `<tr>
+          <td><span class="node-id mono" title="${escapeHtml(node.node_id)}">${escapeHtml(node.node_id.slice(0, 8))}…</span></td>
+          <td><span class="health ${state}"><span class="dot ${state}"></span>${state}</span></td>
+          <td><span class="badge ${node.status === "approved" ? "badge-active" : "badge-planned"}">${escapeHtml(node.status)}</span></td>
+          <td><select class="cell-select role-select" data-node="${escapeHtml(node.node_id)}" aria-label="Role for ${escapeHtml(node.node_id)}">${roles}</select></td>
+          <td class="mono">${reported(hardware.logical_cpu_cores ?? hardware.logical_cpu_count, integer)}</td>
+          <td class="mono">${reported(hardware.ram_bytes ?? hardware.memory_bytes, bytes)}</td>
+          <td class="mono">${hardware.storage_available_bytes == null ? "Not reported" : `${bytes(hardware.storage_available_bytes)} / ${reported(hardware.storage_total_bytes, bytes)}`}</td>
+          <td class="mono">${reported(hardware.gpu_cores, integer)}</td>
+          <td><button class="button button-light button-small save-role" data-node="${escapeHtml(node.node_id)}">Save role</button></td>
+        </tr>`;
+      }).join("");
+    }
+
+    function renderRun(run) {
+      const progress = run.shard_count ? Math.round(run.completed_shards * 100 / run.shard_count) : 0;
+      const verification = run.split_verified ? '<span class="badge badge-active">Split verified</span>' : '<span class="badge badge-prototype">Not verified</span>';
+      const shards = run.shards.map((shard) => `<tr><td>${integer(shard.shard_index + 1)}</td><td class="mono">${integer(shard.start_inclusive)}–${integer(shard.end_exclusive)}</td><td class="mono">${escapeHtml(shard.node_id.slice(0, 8))}…</td><td>${escapeHtml(shard.status)}</td><td class="mono">${shard.duration_ms == null ? "—" : `${integer(shard.duration_ms)} ms`}</td></tr>`).join("");
+      byId("run-panel").innerHTML = `<div class="test-state">${verification}<span class="badge">${escapeHtml(run.status)}</span><span class="mono">${escapeHtml(run.run_id)}</span></div>
+        <div class="run-summary">
+          <div class="run-stat"><div class="run-stat-label">Completed shards</div><div class="run-stat-value">${integer(run.completed_shards)} / ${integer(run.shard_count)}</div></div>
+          <div class="run-stat"><div class="run-stat-label">Participating nodes</div><div class="run-stat-value">${integer(run.participating_nodes)}</div></div>
+          <div class="run-stat"><div class="run-stat-label">End-to-end time</div><div class="run-stat-value">${run.elapsed_ms == null ? "—" : `${(run.elapsed_ms / 1000).toFixed(1)} s`}</div></div>
+          <div class="run-stat"><div class="run-stat-label">Throughput</div><div class="run-stat-value">${run.items_per_second == null ? "—" : `${integer(Math.round(run.items_per_second))} items/s`}</div></div>
+        </div>
+        <div class="progress" aria-label="Shard completion"><span style="width:${progress}%"></span></div>
+        <div class="table-wrap shard-table"><table><thead><tr><th>Shard</th><th>Range</th><th>Node</th><th>Status</th><th>Duration</th></tr></thead><tbody>${shards}</tbody></table></div>`;
+    }
+
+    async function refresh() {
+      if (!passcode) return;
+      try {
+        const [summary, nodes] = await Promise.all([
+          api("/v1/admin/summary"),
+          api("/v1/admin/nodes?limit=100")
+        ]);
+        renderSummary(summary);
+        renderNodes(nodes);
+        if (activeRunId) renderRun(await api(`/v1/admin/test-runs/${encodeURIComponent(activeRunId)}`));
+        byId("connection-dot").classList.add("live");
+        byId("connection-label").textContent = "Connected";
+        setNotice("Fleet data is current.", "success");
+      } catch (error) {
+        byId("connection-dot").classList.remove("live");
+        byId("connection-label").textContent = "Connection error";
+        setNotice(error.message, "error");
+      }
+    }
+
+    byId("auth-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      passcode = byId("passcode").value.trim();
+      sessionStorage.setItem("dc-admin-passcode", passcode);
+      await refresh();
+      if (!refreshTimer) refreshTimer = setInterval(refresh, 15000);
+    });
+    byId("passcode").value = passcode;
+    byId("disconnect").addEventListener("click", () => {
+      sessionStorage.removeItem("dc-admin-passcode");
+      passcode = "";
+      if (refreshTimer) clearInterval(refreshTimer);
+      refreshTimer = null;
+      byId("passcode").value = "";
+      byId("connection-dot").classList.remove("live");
+      byId("connection-label").textContent = "Not connected";
+      setNotice("Passcode cleared from this browser session.");
+    });
+    byId("refresh").addEventListener("click", refresh);
+    byId("nodes").addEventListener("click", async (event) => {
+      const button = event.target.closest(".save-role");
+      if (!button) return;
+      const select = byId("nodes").querySelector(`.role-select[data-node="${CSS.escape(button.dataset.node)}"]`);
+      try {
+        await api(`/v1/admin/nodes/${encodeURIComponent(button.dataset.node)}/role`, {
+          method: "PUT", body: JSON.stringify({ role: select.value })
+        });
+        setNotice("Node role updated.", "success");
+        await refresh();
+      } catch (error) { setNotice(error.message, "error"); }
+    });
+    byId("run-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      try {
+        const run = await api("/v1/admin/test-runs", {
+          method: "POST",
+          body: JSON.stringify({ total_items: Number(byId("total-items").value), shard_count: Number(byId("shard-count").value) })
+        });
+        activeRunId = run.run_id;
+        renderRun(run);
+        setNotice("Diagnostic queued on the least-loaded compute nodes.", "success");
+      } catch (error) { setNotice(error.message, "error"); }
+    });
+
+    if (passcode) {
+      byId("auth-form").requestSubmit();
+    }
+  </script>
+</body>
+</html>

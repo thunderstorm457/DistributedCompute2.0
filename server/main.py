@@ -8,11 +8,13 @@ import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, field_validator
 from redis import Redis
 from redis.exceptions import RedisError
@@ -36,6 +38,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from server.scheduler import choose_compute_nodes
 
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./distributedcompute.db")
@@ -157,6 +160,28 @@ class TestShard(Base):
 
 
 app = FastAPI(title="DistributedCompute Provisioning API", version="0.1.0")
+ROLE_CAPABILITIES = {
+    NodeRole.COMPUTE.value: {
+        "status": "active",
+        "description": "Registers, heartbeats, and runs the built-in diagnostic workload.",
+    },
+    NodeRole.PROVISIONING.value: {
+        "status": "centralized",
+        "description": "Provisioning is currently handled by this API, not a peer node service.",
+    },
+    NodeRole.ID_STORAGE.value: {
+        "status": "planned",
+        "description": "Replicated identity storage is not implemented.",
+    },
+    NodeRole.LOAD_BALANCER.value: {
+        "status": "prototype",
+        "description": "The API has a least-loaded shard selector; peer load-balancer nodes are not active.",
+    },
+    NodeRole.ECONOMY.value: {
+        "status": "prototype",
+        "description": "A CPU/RAM quote calculator exists; settlement receipts, quorum, and ledger are not implemented.",
+    },
+}
 limiter = Limiter(
     key_func=get_remote_address,
     storage_uri=RATE_LIMIT_STORAGE_URI,
@@ -309,6 +334,7 @@ class AdminSummaryResponse(BaseModel):
     registered_nodes: int
     online_nodes: int
     nodes_by_role: dict[str, int]
+    role_capabilities: dict[str, dict[str, str]]
     registered_capacity: ResourceTotals
 
 
@@ -667,6 +693,11 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/admin", include_in_schema=False)
+def admin_dashboard():
+    return FileResponse(Path(__file__).parent / "static" / "admin.html")
+
+
 @app.get("/ready")
 def readiness(db: Session = Depends(get_db)):
     try:
@@ -846,6 +877,7 @@ def admin_summary(
         registered_nodes=aggregate[0],
         online_nodes=count_online_nodes(),
         nodes_by_role=nodes_by_role,
+        role_capabilities=ROLE_CAPABILITIES,
         registered_capacity=ResourceTotals(
             logical_cpu_cores=aggregate[1],
             ram_bytes=aggregate[2],
@@ -926,6 +958,20 @@ def create_test_run(
             detail="total_items must be at least the number of shards",
         )
 
+    active_task_counts = dict(
+        db.execute(
+            select(TestShard.node_id, func.count(TestShard.id))
+            .where(TestShard.status.in_(("queued", "claimed")))
+            .group_by(TestShard.node_id)
+        ).all()
+    )
+    try:
+        selected_nodes = choose_compute_nodes(
+            online_nodes, active_task_counts, run_request.shard_count
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     now = datetime.now(timezone.utc)
     run = TestRun(
         id=str(uuid.uuid4()),
@@ -944,7 +990,7 @@ def create_test_run(
             id=str(uuid.uuid4()),
             run_id=run.id,
             shard_index=index,
-            node_id=online_nodes[index].id,
+            node_id=selected_nodes[index].id,
             start_inclusive=start,
             end_exclusive=start + size,
             status="queued",

@@ -11,6 +11,7 @@ This repository is a development prototype. The items below distinguish implemen
 - A deterministic CPU/RAM credit quote and settlement calculator. It is not connected to a ledger.
 - An admin-only, bounded sharded sum-of-squares diagnostic with exact result verification. It requires distinct online compute node IDs; those IDs are not proof of distinct physical machines, and physical multi-machine performance has not yet been tested.
 - An admin fleet summary with SQL-aggregated self-reported CPU, RAM, storage, and GPU counts; agents refresh reports on identity recovery. These are not benchmarked or guaranteed-available capacity, and storage-free space can become stale until the next report.
+- A browser admin dashboard at `/admin` with role-status labels and diagnostic controls. Node roles other than compute do not yet have dedicated peer services; the current load-balancing behavior is central API shard selection.
 - A non-root API container definition, PostgreSQL/Redis CI workflow, and a per-user macOS LaunchAgent installer.
 
 ## Blockers Before Public Staging

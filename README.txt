@@ -234,6 +234,7 @@ Mac Node Agent with Keychain identity storage and a development LaunchAgent inst
 CPU and memory Compute Credit quote and settlement calculations.
 An admin-only distributed `sum_squares` diagnostic that requires distinct online compute nodes and verifies shard coverage/results.
 An admin summary endpoint that totals self-reported CPU, RAM, storage, and GPU capacity, including counts of nodes reporting each value. The Node Agent refreshes this hardware report when it recovers an identity.
+An `/admin` browser dashboard for fleet capacity, role status, and built-in diagnostic runs. The central test scheduler assigns shards to the least-loaded eligible compute nodes.
 
 The target product is a serverless-style compute grid: users submit bounded container workloads, opted-in nodes execute eligible tasks, and contributors earn internal credits for verified resources delivered. A user's credits can pay for capacity across many providers; they do not need to own as many cores as the workload requests. Work must expose parallel tasks or distributed-service behavior to use multiple independent computers; arbitrary containers cannot be split automatically. The initial CPU/RAM credit definition is documented in docs/economics.md.
 

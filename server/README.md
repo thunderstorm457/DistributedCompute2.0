@@ -89,6 +89,11 @@ Storage-free space and other changing resources are not continuously sampled.
 `online_nodes` is a liveness count, not a guarantee of immediately schedulable
 capacity.
 
+Open `/admin` for the readable admin dashboard. It uses the passcode from the
+`X-Admin-Passcode` header in the page session, displays capacity and role
+status, and can create and monitor the built-in diagnostic. The dashboard is
+served by the API and does not imply that the other role services are active.
+
 New volunteer nodes self-register as approved compute nodes. The admin can
 reject a node using `PUT /v1/admin/nodes/{node_id}/enrollment` with
 `{"status":"rejected"}` and the admin passcode header. Rejected nodes cannot
@@ -158,5 +163,5 @@ deploy it or provide hosting, backups, monitoring, or a public domain.
 Run the API, migration, economics, and agent tests from the repository root:
 
 ```sh
-python -m unittest server.test_main server.test_migrations server.test_economics node_agent.test_client node_agent.test_macos_service
+python -m unittest server.test_main server.test_migrations server.test_economics server.test_scheduler node_agent.test_client node_agent.test_macos_service
 ```
